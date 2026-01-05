@@ -48,25 +48,30 @@ jobs:
               mkdir -p "$version"
               wget -q "$url" -O "${version}.tar.gz"
               
-              tar -xzf "${version}.tar.gz" -C "$version" --strip-components=1 2>/dev/null || true
+              echo "Extracting ${version}.tar.gz..."
+              tar -xzf "${version}.tar.gz" -C "$version" --strip-components=1
               
               rm "${version}.tar.gz"
               echo "✓ Extracted $version"
+              ls -la "$version" | head -5
             else
               echo "⊘ $version already exists"
             fi
           done
-      
-      - name: Sync Base Rootfs
-        run: |
-          echo "Syncing base rootfs from ULO-repository..."
           
+          echo "Kernels extracted:"
+          ls -la
+      
+      - name: Sync Rootfs
+        run: |
+          echo "Syncing all rootfs files..."
+          
+          mkdir -p rootfs
+          cd rootfs
+          
+          echo "Downloading base rootfs from ULO-repository..."
           REPO="armarchindo/ULO-repository"
           API_URL="https://api.github.com/repos/${REPO}/contents/rootfs"
-          
-          mkdir -p rootfs/base
-          cd rootfs/base
-          
           FILES=$(curl -s "$API_URL" | jq -r '.[] | select(.type == "file") | .download_url')
           
           for url in $FILES; do
@@ -76,17 +81,10 @@ jobs:
               echo "✓ Downloaded $filename"
             fi
           done
-      
-      - name: Sync Custom Rootfs from Releases
-        run: |
-          echo "Syncing custom rootfs from releases..."
           
+          echo "Downloading custom rootfs from releases..."
           REPO="armarchindo/rootfs-openwrt"
           API_URL="https://api.github.com/repos/${REPO}/releases"
-          
-          mkdir -p rootfs/custom
-          cd rootfs/custom
-          
           ASSETS=$(curl -s "$API_URL" | jq -r '.[].assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -5)
           
           for url in $ASSETS; do
@@ -96,6 +94,9 @@ jobs:
               echo "✓ Downloaded $filename"
             fi
           done
+          
+          echo "Rootfs files:"
+          ls -la
       
       - name: Sync Firmware
         run: |
