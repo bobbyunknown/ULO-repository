@@ -1,0 +1,161 @@
+name: Sync ULO Data
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout data branch
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+      
+      - name: Sync Kernels from Releases
+        run: |
+          echo "Downloading kernels from armarchindo/kernel releases..."
+          
+          RELEASE_TAG="kernel_dbai"
+          API_URL="https://api.github.com/repos/armarchindo/kernel/releases/tags/${RELEASE_TAG}"
+          
+          ASSETS=$(curl -s "$API_URL" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url')
+          
+          mkdir -p kernels
+          cd kernels
+          
+          for url in $ASSETS; do
+            filename=$(basename "$url")
+            version="${filename%.tar.gz}"
+            
+            echo "Processing $version..."
+            
+            if [ ! -d "$version" ]; then
+              mkdir -p "$version"
+              wget -q "$url" -O "${version}.tar.gz"
+              
+              tar -xzf "${version}.tar.gz" -C "$version" --strip-components=1 2>/dev/null || true
+              
+              rm "${version}.tar.gz"
+              echo "✓ Extracted $version"
+            else
+              echo "⊘ $version already exists"
+            fi
+          done
+      
+      - name: Sync Base Rootfs
+        run: |
+          echo "Syncing base rootfs from ULO-repository..."
+          
+          REPO="armarchindo/ULO-repository"
+          API_URL="https://api.github.com/repos/${REPO}/contents/rootfs"
+          
+          mkdir -p rootfs/base
+          cd rootfs/base
+          
+          FILES=$(curl -s "$API_URL" | jq -r '.[] | select(.type == "file") | .download_url')
+          
+          for url in $FILES; do
+            filename=$(basename "$url")
+            if [ ! -f "$filename" ]; then
+              wget -q "$url"
+              echo "✓ Downloaded $filename"
+            fi
+          done
+      
+      - name: Sync Custom Rootfs from Releases
+        run: |
+          echo "Syncing custom rootfs from releases..."
+          
+          REPO="armarchindo/rootfs-openwrt"
+          API_URL="https://api.github.com/repos/${REPO}/releases"
+          
+          mkdir -p rootfs/custom
+          cd rootfs/custom
+          
+          ASSETS=$(curl -s "$API_URL" | jq -r '.[].assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -5)
+          
+          for url in $ASSETS; do
+            filename=$(basename "$url")
+            if [ ! -f "$filename" ]; then
+              wget -q "$url"
+              echo "✓ Downloaded $filename"
+            fi
+          done
+      
+      - name: Sync Firmware
+        run: |
+          echo "Syncing firmware from ULO-repository..."
+          
+          REPO="armarchindo/ULO-repository"
+          
+          rm -rf firmware
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/${REPO}.git temp_firmware
+          cd temp_firmware
+          git sparse-checkout set firmware
+          cd ..
+          
+          mv temp_firmware/firmware ./
+          rm -rf temp_firmware
+          
+          echo "✓ Firmware synced"
+      
+      - name: Sync Devices
+        run: |
+          echo "Syncing devices from ULO-Builder..."
+          
+          REPO="armarchindo/ULO-Builder"
+          
+          rm -rf devices
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/${REPO}.git temp_devices
+          cd temp_devices
+          git sparse-checkout set device
+          cd ..
+          
+          mv temp_devices/device ./devices
+          rm -rf temp_devices
+          
+          echo "✓ Devices synced"
+      
+      - name: Sync Loaders
+        run: |
+          echo "Syncing loaders from ULO-Builder..."
+          
+          REPO="armarchindo/ULO-Builder"
+          
+          rm -rf loader
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/${REPO}.git temp_loader
+          cd temp_loader
+          git sparse-checkout set core/loader
+          cd ..
+          
+          mv temp_loader/core/loader ./loader
+          rm -rf temp_loader
+          
+          echo "✓ Loaders synced"
+      
+      - name: Commit and Push
+        run: |
+          git add -A
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-sync: $(date +'%Y-%m-%d %H:%M:%S')"
+            git push origin data
+            echo "✓ Changes pushed to data branch"
+          fi
