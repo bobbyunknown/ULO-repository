@@ -21,10 +21,15 @@ jobs:
           ref: data
           token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Setup Git
+      - name: Setup Git and Git LFS
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
+          
+          git lfs install
+          git lfs track "*.tar.gz"
+          git lfs track "*.img.gz"
+          git add .gitattributes
       
       - name: Sync Kernels from Releases
         run: |
